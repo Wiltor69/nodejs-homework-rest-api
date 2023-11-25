@@ -1,8 +1,16 @@
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
+const Jimp = require("jimp");
+const fs = require("fs/promises");
+const path = require("path");
+const gravatar = require("gravatar");
+
 const { HttpError, ctrlWrapper } = require("../helpers");
 const { User } = require("../models/user");
+
 const { SECRET_KEY } = process.env;
+
+const avatarDir = path.join(__dirname, "../", "public", "avatars");
 
 const register = async (req, res) => {
   const { email, password } = req.body;
@@ -11,7 +19,12 @@ const register = async (req, res) => {
     throw HttpError(409, "Email in use");
   }
   const hashPass = await bcrypt.hash(password, 10);
-  const newUser = await User.create({ ...req.body, password: hashPass });
+  const avatarUrl = gravatar.url(email);
+  const newUser = await User.create({
+    ...req.body,
+    password: hashPass,
+    avatarUrl,
+  });
   res.status(201).json({
     user: {
       email: newUser.email,
@@ -71,10 +84,33 @@ const getCurrent = async (req, res) => {
   res.json({ email, subscription });
 };
 
+const updateAvatar = async (req, res) => {
+  const { _id } = req.user;
+  if (!req.file) throw HttpError(400, "missing field avatar");
+
+  const { path: tempUpload, originalname } = req.file;
+  await Jimp.read(tempUpload).then((img) =>
+    img.resize(250, 250).write(`${tempUpload}`)
+  );
+
+  const fileName = `${_id}_${originalname}`;
+  const resultUpload = path.join(avatarDir, fileName);
+
+  await fs.rename(tempUpload, resultUpload);
+
+  const avatarURL = path.join("avatars", fileName);
+  await User.findByIdAndUpdate(_id, { avatarURL });
+
+  if (!avatarURL) throw HttpError(404, "Not found");
+
+  res.json({ avatarURL });
+};
+
 module.exports = {
   register: ctrlWrapper(register),
   login: ctrlWrapper(login),
   updateSubscription: ctrlWrapper(updateSubscription),
   logout: ctrlWrapper(logout),
   getCurrent: ctrlWrapper(getCurrent),
+  updateAvatar: ctrlWrapper(updateAvatar),
 };
